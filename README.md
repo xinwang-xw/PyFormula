@@ -33,4 +33,4 @@ The above code populates the data from the dataframe df by using the formula spe
 
 ## TODO List
 
-The package is still on developing and populates the data correctly, but the running speed or chunksize for large data haven't been taken into account
+The package is still on developing and populates the data correctly for now, but the running speed or chunksize for large data haven't been taken into account
