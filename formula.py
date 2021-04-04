@@ -22,7 +22,7 @@ class Formula:
     power_pattern : str
         The pattern to create the exponetial term, that is, I(variable^power)
         
-    polynomial_patter : str
+    polynomial_pattern : str
         The pattern to create the polynomial terms, that is, poly(variable, power)
 
     transform_pattern : str
@@ -42,7 +42,7 @@ class Formula:
     >>> X_df = pd.DataFrame(data['data'])
     >>> X_df.columns = ['sepal_len', 'sepal_width', 'petal_len', "petal_width"]
     >>> Y_df = pd.DataFrame({'Class': data['target']})
-    >>> df = pd.concat([X_df, Y.reset_index(drop=True)], axis=1)
+    >>> df = pd.concat([X_df, Y_df.reset_index(drop=True)], axis=1)
     >>> fml = Formula()
     >>> X, Y = fml("Class ~ 1 + I(sepal_len^(0.5)) + log(petal_len)", data=df)
     """
@@ -63,34 +63,46 @@ class Formula:
         # Create the chunksize for generator (Not use for now)
         self.chunksize = chunksize
 
+    def get_dummy_feature_(self, feature):
+        feature = feature[feature.find("(")+1:feature.find(")")]
+        return pd.get_dummies(self.data[feature]).values.T
+
+    def get_transform_feature_(self, feature):
+        op = feature[:feature.find("(")]
+        feature = feature[feature.find("(")+1:feature.find(")")]
+        return self.data[feature].transform(op).values
+    
+    def get_power_feature_(self, feature):
+        feature = feature[feature.find("(")+1:feature.rfind(")")]
+        feature, power = list(map(str.strip, feature.split("^")))
+        if "(" in power and ")" in power:
+            power = power[power.find("(")+1:power.find(")")].strip()
+            if "/" in power:
+                power = sum(Fraction(s) for s in power.split())
+        return self.data[feature].transform(lambda x: x**(float(power))).values
+
+    def get_polynomial_feature_(self, feature):
+        feature = feature[feature.find("(")+1:feature.find(")")]
+        feature, power = list(map(str.strip, feature.split(",")))
+        power = int(power)
+        if power < 1:
+            raise ValueError("Power should be no small than 1 in the poly")
+        return np.array([self.data[feature].transform(lambda x: x**p).values 
+                            for p in range(1, power + 1)])
+
     def parse_op_(self, feature):
         """Parse the feature corresponding to different patterns
         """
         if feature in self.data.columns:
             return self.data[feature].values
         elif re.search(self.dummy_pattern, feature):
-            feature = feature[feature.find("(")+1:feature.find(")")]
-            return pd.get_dummies(self.data[feature]).values.T
+            return self.get_dummy_feature_(feature)
         elif re.search(self.transform_pattern, feature):
-            op = feature[:feature.find("(")]
-            feature = feature[feature.find("(")+1:feature.find(")")]
-            return self.data[feature].transform(op).values
+            return self.get_transform_feature_(feature)
         elif re.search(self.power_pattern, feature):
-            feature = feature[feature.find("(")+1:feature.rfind(")")]
-            feature, power = list(map(str.strip, feature.split("^")))
-            if "(" in power and ")" in power:
-                power = power[power.find("(")+1:power.find(")")].strip()
-                if "/" in power:
-                    power = sum(Fraction(s) for s in power.split())
-            return self.data[feature].transform(lambda x: x**(float(power))).values  
+            return self.get_power_feature_(feature)
         elif re.search(self.polynomial_pattern, feature):
-            feature = feature[feature.find("(")+1:feature.find(")")]
-            feature, power = list(map(str.strip, feature.split(",")))
-            power = int(power)
-            if power < 1:
-                raise ValueError("Power should be no small than 1 in the poly")
-            return np.array([self.data[feature].transform(lambda x: x**p).values 
-                             for p in range(1, power + 1)])
+            return self.get_polynomial_feature_(feature)
         else:
             raise ValueError("The current operation is not supported")
         
@@ -132,9 +144,12 @@ class Formula:
         dep, indep = map(str.strip, string.split("~"))
         self.data = data
         # Get the response data
-        if dep not in self.data.columns:
+        if dep in self.data.columns:
+            y = self.data[dep].values
+        elif re.search(self.transform_pattern, dep):
+            y = self.get_transform_feature_(dep)
+        else:
             raise ValueError("The response columns should be in the data")
-        y = self.data[dep].values
 
         # Get the feature data
         X = self.parse_features_(indep)
